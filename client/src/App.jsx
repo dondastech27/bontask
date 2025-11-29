@@ -3,16 +3,43 @@ import { useState, useEffect } from 'react';
 import './App.css';
 import TaskBoard from './components/TaskBoard';
 import NewTaskModal from './components/NewTaskModal';
+import AuthModal from './components/AuthModal';
 
 function App() {
   const [activeTab, setActiveTab] = useState('dashboard');
   const [tasks, setTasks] = useState([]);
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
+  const [user, setUser] = useState(null);
 
-  // Load tasks from backend
+  // Check for stored auth on mount
   useEffect(() => {
-    fetch(`${import.meta.env.VITE_API_URL}/tasks`)
+    const token = localStorage.getItem('token');
+    const storedUser = localStorage.getItem('user');
+
+    if (token && storedUser) {
+      setUser(JSON.parse(storedUser));
+    } else {
+      setIsAuthModalOpen(true);
+    }
+  }, []);
+
+  // Load tasks from backend when user is authenticated
+  useEffect(() => {
+    if (!user) return;
+
+    const token = localStorage.getItem('token');
+    fetch(`${import.meta.env.VITE_API_URL}/tasks`, {
+      headers: {
+        'Authorization': `Bearer ${token}`
+      }
+    })
       .then(res => {
+        if (res.status === 401 || res.status === 403) {
+          // Token expired or invalid
+          handleLogout();
+          return [];
+        }
         if (!res.ok) {
           console.error('Failed to fetch tasks, status:', res.status);
           return [];
@@ -24,12 +51,16 @@ function App() {
         console.error('Failed to load tasks', err);
         setTasks([]);
       });
-  }, []);
+  }, [user]);
 
   const addTask = async (newTask) => {
+    const token = localStorage.getItem('token');
     const res = await fetch(`${import.meta.env.VITE_API_URL}/tasks`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${token}`
+      },
       body: JSON.stringify(newTask),
     });
     if (!res.ok) {
@@ -38,6 +69,23 @@ function App() {
     const created = await res.json();
     setTasks(prev => [created, ...prev]);
   };
+
+  const handleLogout = () => {
+    localStorage.removeItem('token');
+    localStorage.removeItem('user');
+    setUser(null);
+    setTasks([]);
+    setIsAuthModalOpen(true);
+  };
+
+  const handleAuthSuccess = (userData) => {
+    setUser(userData);
+  };
+
+  // Show auth modal if not logged in
+  if (!user) {
+    return <AuthModal isOpen={isAuthModalOpen} onClose={() => { }} onSuccess={handleAuthSuccess} />;
+  }
 
   // Ensure tasks is always an array for filter/map operations
   const safeTasks = Array.isArray(tasks) ? tasks : [];
