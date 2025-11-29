@@ -14,32 +14,46 @@ const sendDailyReminders = async (pool) => {
         const today = new Date().toISOString().slice(0, 10);
         console.log(`Checking for tasks due on ${today}...`);
 
-        // Find tasks due today that are not done
-        const result = await pool.query(
-            "SELECT * FROM tasks WHERE due_date = $1 AND status != 'done'",
-            [today]
-        );
+        // Get all users
+        const usersResult = await pool.query('SELECT id, email, name FROM users');
 
-        if (result.rows.length === 0) {
-            console.log('No tasks due today.');
+        if (usersResult.rows.length === 0) {
+            console.log('No users found.');
             return;
         }
 
-        const tasksList = result.rows
-            .map(t => `- [${t.priority ? t.priority.toUpperCase() : 'NORMAL'}] ${t.title}`)
-            .join('\n');
+        // Send email to each user with their tasks
+        for (const user of usersResult.rows) {
+            const tasksResult = await pool.query(
+                "SELECT * FROM tasks WHERE user_id = $1 AND due_date = $2 AND status != 'done'",
+                [user.id, today]
+            );
 
-        const mailOptions = {
-            from: process.env.EMAIL_USER,
-            to: process.env.EMAIL_TO,
-            subject: `Daily Task Reminder - ${today}`,
-            text: `Good Morning!\n\nYou have the following tasks due today:\n\n${tasksList}\n\nGood luck!`,
-        };
+            if (tasksResult.rows.length === 0) {
+                console.log(`No tasks due today for ${user.email}`);
+                continue;
+            }
 
-        const info = await transporter.sendMail(mailOptions);
-        console.log('Daily reminder email sent:', info.response);
+            const tasksList = tasksResult.rows
+                .map(t => `- [${t.priority ? t.priority.toUpperCase() : 'NORMAL'}] ${t.title}`)
+                .join('\n');
+
+            const mailOptions = {
+                from: process.env.EMAIL_USER,
+                to: user.email,
+                subject: `Daily Task Reminder - ${today}`,
+                text: `Good Morning${user.name ? ' ' + user.name : ''}!\n\nYou have the following tasks due today:\n\n${tasksList}\n\nGood luck!`,
+            };
+
+            try {
+                const info = await transporter.sendMail(mailOptions);
+                console.log(`Reminder email sent to ${user.email}:`, info.response);
+            } catch (emailErr) {
+                console.error(`Failed to send email to ${user.email}:`, emailErr);
+            }
+        }
     } catch (error) {
-        console.error('Error sending daily reminder:', error);
+        console.error('Error sending daily reminders:', error);
     }
 };
 
